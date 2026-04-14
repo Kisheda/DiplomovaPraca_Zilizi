@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +50,8 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
     historyData,
     loading: historyLoading,
     error: historyError,
+    rangeLabel,
+    rawMeasurementCount,
   } = useSupabaseData();
   const {
     temperature,
@@ -169,23 +171,9 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
     let updateError: { message: string } | null = null;
 
     if (windowshadeSettingsId === null) {
-      const { data: lastSetting, error: lastSettingError } = await supabase
-        .from("Settings")
-        .select("id")
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (lastSettingError) {
-        setWindowshadeSettingsMessage(`Settings save error: ${lastSettingError.message}`);
-        setWindowshadeSettingsSaving(false);
-        return;
-      }
-
-      const nextId = Number(lastSetting?.id ?? 0) + 1;
       const { data, error } = await supabase
         .from("Settings")
-        .insert({ id: nextId, ...payload })
+        .insert(payload)
         .select("id")
         .single();
 
@@ -216,11 +204,27 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
     }
 
     setWindowshadeSettingsId(typeof updated.id === "number" ? updated.id : Number(updated.id));
-    setWindowshadeSettingsMessage("Windowshade nyitasi/zaro ido elmentve.");
+    setWindowshadeSettingsMessage("Windowshade OPEN/CLOSE times saved.");
     setWindowshadeSettingsSaving(false);
   };
 
   const connectionError = historyError || mqttError;
+
+  const chartData = useMemo(
+    () => historyData.map((point) => ({ ...point, timestampMs: new Date(point.timestamp).getTime() })),
+    [historyData]
+  );
+  const filledBucketCount = useMemo(
+    () => historyData.filter((row) => row.temp !== null || row.humidity !== null || row.soil !== null || row.light !== null || row.pressure !== null).length,
+    [historyData]
+  );
+  const recentHistoryRows = useMemo(() => historyData.slice().reverse(), [historyData]);
+  const chartWindowEndMs = useMemo(() => {
+    const points = chartData.filter((point) => Number.isFinite(point.timestampMs));
+    if (points.length === 0) return Date.now();
+    return points[points.length - 1].timestampMs;
+  }, [chartData]);
+  const chartWindowStartMs = chartWindowEndMs - 24 * 60 * 60 * 1000;
 
   const moduleStatus = {
     Meteostanica: meteoStatus === "ONLINE" ? "ONLINE" : "OFFLINE",
@@ -318,28 +322,65 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                 <CardHeader>
                   <CardTitle>Sensor Data Timeline</CardTitle>
                 </CardHeader>
-                <CardContent className="h-80">
+                <CardContent className="space-y-3">
                   <div className="mb-3 text-sm text-slate-500">
-                    History rows: {historyData.length} / Loading: {String(historyLoading)}
+                    Buckets (15m): {historyData.length} / Filled buckets: {filledBucketCount} / Raw rows: {rawMeasurementCount} / Range: {rangeLabel} / Loading: {String(historyLoading)}
                   </div>
                   {historyLoading ? (
-                    <div className="flex h-full items-center justify-center text-slate-500">Loading history chart...</div>
+                    <div className="flex h-80 items-center justify-center text-slate-500">Loading history chart...</div>
                   ) : historyData.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-slate-500">No history data available.</div>
+                    <div className="flex h-80 items-center justify-center text-slate-500">No history data available.</div>
                   ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={historyData} margin={{ top: 10, right: 10, bottom: 5, left: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="timestamp" tickFormatter={formatTimestamp} />
-                        <YAxis />
-                        <Tooltip labelFormatter={(value) => formatTimestamp(String(value))} />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line type="monotone" dataKey="temp" name="Temperature" stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-                        <Line type="monotone" dataKey="humidity" name="Humidity" stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
-                        <Line type="monotone" dataKey="soil" name="Soil Moisture" stroke="#2ca02c" strokeWidth={2} dot={false} connectNulls />
-                        <Line type="monotone" dataKey="light" name="Light" stroke="#d62728" strokeWidth={2} dot={false} connectNulls />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    <>
+                      <div className="h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData} margin={{ top: 10, right: 10, bottom: 5, left: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis
+                              type="number"
+                              dataKey="timestampMs"
+                              domain={[chartWindowStartMs, chartWindowEndMs]}
+                              tickFormatter={(value) => formatTimestamp(new Date(Number(value)).toISOString())}
+                              minTickGap={40}
+                            />
+                            <YAxis />
+                            <Tooltip labelFormatter={(value) => formatTimestamp(new Date(Number(value)).toISOString())} />
+                            <Legend verticalAlign="top" height={36} />
+                            <Line type="monotone" dataKey="temp" name="Temperature" stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls={false} />
+                            <Line type="monotone" dataKey="humidity" name="Humidity" stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls={false} />
+                            <Line type="monotone" dataKey="soil" name="Soil Moisture" stroke="#2ca02c" strokeWidth={2} dot={false} connectNulls={false} />
+                            <Line type="monotone" dataKey="light" name="Light" stroke="#d62728" strokeWidth={2} dot={false} connectNulls={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      <div className="rounded-xl border">
+                        <div className="max-h-44 overflow-auto">
+                          <table className="w-full text-xs">
+                            <thead className="bg-slate-100 text-slate-700">
+                              <tr>
+                                <th className="px-2 py-2 text-left font-medium">Time</th>
+                                <th className="px-2 py-2 text-right font-medium">Temp (C)</th>
+                                <th className="px-2 py-2 text-right font-medium">Humidity (%)</th>
+                                <th className="px-2 py-2 text-right font-medium">Soil (%)</th>
+                                <th className="px-2 py-2 text-right font-medium">Light (lx)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {recentHistoryRows.map((row) => (
+                                <tr key={row.timestamp} className="border-t">
+                                  <td className="px-2 py-1.5 text-left">{formatTimestamp(row.timestamp)}</td>
+                                  <td className="px-2 py-1.5 text-right">{row.temp ?? "-"}</td>
+                                  <td className="px-2 py-1.5 text-right">{row.humidity ?? "-"}</td>
+                                  <td className="px-2 py-1.5 text-right">{row.soil ?? "-"}</td>
+                                  <td className="px-2 py-1.5 text-right">{row.light ?? "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </CardContent>
               </Card>
@@ -571,7 +612,7 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                             onClick={handleSaveWindowshadeSettings}
                             disabled={windowshadeSettingsSaving}
                           >
-                            {windowshadeSettingsSaving ? "Mentes..." : "Save times"}
+                            {windowshadeSettingsSaving ? "Saving..." : "Save times"}
                           </Button>
                           {windowshadeSettingsMessage ? (
                             <span className="text-xs text-slate-600">{windowshadeSettingsMessage}</span>

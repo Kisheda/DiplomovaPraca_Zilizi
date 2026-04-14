@@ -71,6 +71,7 @@ const unsigned long PUMP_ON_TIME_MS = 3000;
 // ---------- Timers ----------
 unsigned long lastPublish = 0;
 unsigned long lastSupabaseLog = 0;
+const unsigned long PUBLISH_INTERVAL_MS = 300000; // 5 minutes
 
 int soilPercent(int raw) {
   int pct = map(raw, RAW_DRY, RAW_WET, 0, 100);
@@ -394,7 +395,7 @@ void loop() {
   }
 
   // -------- MQTT + Supabase publish --------
-  if (millis() - lastPublish >= 5000) {
+  if (millis() - lastPublish >= PUBLISH_INTERVAL_MS) {
     lastPublish = millis();
 
     client.publish(topic_status, "ONLINE", true);
