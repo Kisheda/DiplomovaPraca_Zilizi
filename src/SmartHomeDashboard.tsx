@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, ShieldAlert, Thermometer, Droplets, Sun, Gauge, Wifi, AlertCircle, ScrollText, LogOut, CreditCard, UserPlus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -40,6 +41,11 @@ function MetricCard({ title, value, unit, icon: Icon }: { title: string; value: 
 }
 
 export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsClick?: () => void; onLogout?: () => void }) {
+  const DEFAULT_WINDOWSHADE_OPEN = "07:00";
+  const DEFAULT_WINDOWSHADE_CLOSE = "20:00";
+
+  const isValidTime = (value: string) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value);
+
   const {
     historyData,
     loading: historyLoading,
@@ -54,6 +60,7 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
     coStatus,
     meteoStatus,
     windowshadeState,
+    windowshadePosition,
     windowshadeStatus,
     displayStatus,
     securityStatus,
@@ -76,6 +83,12 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
   const alarmArmed = alarmState === "ON";
   const [authorizedCardCount, setAuthorizedCardCount] = useState<number | null>(null);
   const [enrollLoading, setEnrollLoading] = useState(false);
+  const [windowshadeSettingsId, setWindowshadeSettingsId] = useState<number | null>(null);
+  const [windowshadeOpenValue, setWindowshadeOpenValue] = useState<string>(DEFAULT_WINDOWSHADE_OPEN);
+  const [windowshadeCloseValue, setWindowshadeCloseValue] = useState<string>(DEFAULT_WINDOWSHADE_CLOSE);
+  const [windowshadeSettingsLoading, setWindowshadeSettingsLoading] = useState(true);
+  const [windowshadeSettingsSaving, setWindowshadeSettingsSaving] = useState(false);
+  const [windowshadeSettingsMessage, setWindowshadeSettingsMessage] = useState<string | null>(null);
 
   const fetchCardCount = () => {
     supabase
@@ -88,10 +101,123 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
     fetchCardCount();
   }, []);
 
+  useEffect(() => {
+    const fetchWindowshadeSettings = async () => {
+      setWindowshadeSettingsLoading(true);
+      setWindowshadeSettingsMessage(null);
+
+      const { data, error } = await supabase
+        .from("Settings")
+        .select("id,module,settings")
+        .eq("module", "windowshade")
+        .maybeSingle();
+
+      if (error) {
+        setWindowshadeSettingsMessage(`Settings load error: ${error.message}`);
+        setWindowshadeSettingsLoading(false);
+        return;
+      }
+
+      if (data) {
+        const settings = (data.settings ?? {}) as { OPEN?: unknown; CLOSE?: unknown };
+        const nextOpen = String(settings.OPEN ?? "").trim();
+        const nextClose = String(settings.CLOSE ?? "").trim();
+
+        setWindowshadeSettingsId(typeof data.id === "number" ? data.id : Number(data.id));
+        setWindowshadeOpenValue(isValidTime(nextOpen) ? nextOpen : DEFAULT_WINDOWSHADE_OPEN);
+        setWindowshadeCloseValue(isValidTime(nextClose) ? nextClose : DEFAULT_WINDOWSHADE_CLOSE);
+      } else {
+        setWindowshadeSettingsId(null);
+        setWindowshadeOpenValue(DEFAULT_WINDOWSHADE_OPEN);
+        setWindowshadeCloseValue(DEFAULT_WINDOWSHADE_CLOSE);
+      }
+
+      setWindowshadeSettingsLoading(false);
+    };
+
+    fetchWindowshadeSettings();
+  }, []);
+
   const handleEnrollMode = async () => {
     setEnrollLoading(true);
     publishEnrollOn();
     setTimeout(() => setEnrollLoading(false), 2000);
+  };
+
+  const handleSaveWindowshadeSettings = async () => {
+    const openTime = windowshadeOpenValue.trim();
+    const closeTime = windowshadeCloseValue.trim();
+
+    if (!isValidTime(openTime) || !isValidTime(closeTime)) {
+      setWindowshadeSettingsMessage("OPEN es CLOSE formatum: HH:MM (pl. 07:00). ");
+      return;
+    }
+
+    setWindowshadeSettingsSaving(true);
+    setWindowshadeSettingsMessage(null);
+
+    const payload = {
+      module: "windowshade",
+      settings: {
+        OPEN: openTime,
+        CLOSE: closeTime,
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    let updated: { id: number | string } | null = null;
+    let updateError: { message: string } | null = null;
+
+    if (windowshadeSettingsId === null) {
+      const { data: lastSetting, error: lastSettingError } = await supabase
+        .from("Settings")
+        .select("id")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastSettingError) {
+        setWindowshadeSettingsMessage(`Settings save error: ${lastSettingError.message}`);
+        setWindowshadeSettingsSaving(false);
+        return;
+      }
+
+      const nextId = Number(lastSetting?.id ?? 0) + 1;
+      const { data, error } = await supabase
+        .from("Settings")
+        .insert({ id: nextId, ...payload })
+        .select("id")
+        .single();
+
+      updated = data;
+      updateError = error;
+    } else {
+      const { data, error } = await supabase
+        .from("Settings")
+        .update(payload)
+        .eq("id", windowshadeSettingsId)
+        .select("id")
+        .single();
+
+      updated = data;
+      updateError = error;
+    }
+
+    if (updateError) {
+      setWindowshadeSettingsMessage(`Settings save error: ${updateError.message}`);
+      setWindowshadeSettingsSaving(false);
+      return;
+    }
+
+    if (!updated) {
+      setWindowshadeSettingsMessage("Settings save error: unknown database response.");
+      setWindowshadeSettingsSaving(false);
+      return;
+    }
+
+    setWindowshadeSettingsId(typeof updated.id === "number" ? updated.id : Number(updated.id));
+    setWindowshadeSettingsMessage("Windowshade nyitasi/zaro ido elmentve.");
+    setWindowshadeSettingsSaving(false);
   };
 
   const connectionError = historyError || mqttError;
@@ -383,8 +509,9 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                     </Badge>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className={`space-y-4 text-sm text-slate-500 ${moduleStatus.Windowshade !== "ONLINE" ? "pointer-events-none" : ""}`}>
+                <CardContent className="space-y-4 text-sm text-slate-500">
                   <div>State: {windowshadeState}</div>
+                  <div>Position: {windowshadePosition}</div>
                   <div>MQTT status: {commandStatus || "Unknown"}</div>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -408,6 +535,50 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                     >
                       Open
                     </Button>
+                  </div>
+                  <div className="rounded-2xl border p-4 space-y-3">
+                    <div>
+                      <p className="font-medium text-slate-800">Windowshade Settings </p>
+                      <p className="text-xs text-slate-500">Enter OPEN and CLOSE timeslots in the format: (HH:MM).</p>
+                    </div>
+                    {windowshadeSettingsLoading ? (
+                      <div className="text-xs text-slate-500">Loading settings...</div>
+                    ) : (
+                      <>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-700">OPEN (opening time)</label>
+                            <Input
+                              type="time"
+                              value={windowshadeOpenValue}
+                              onChange={(event) => setWindowshadeOpenValue(event.target.value)}
+                              step={60}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-700">CLOSE (closing time)</label>
+                            <Input
+                              type="time"
+                              value={windowshadeCloseValue}
+                              onChange={(event) => setWindowshadeCloseValue(event.target.value)}
+                              step={60}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="default"
+                            onClick={handleSaveWindowshadeSettings}
+                            disabled={windowshadeSettingsSaving}
+                          >
+                            {windowshadeSettingsSaving ? "Mentes..." : "Save times"}
+                          </Button>
+                          {windowshadeSettingsMessage ? (
+                            <span className="text-xs text-slate-600">{windowshadeSettingsMessage}</span>
+                          ) : null}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>

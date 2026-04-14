@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <AccelStepper.h>
 #include <HTTPClient.h>
+#include <time.h>
 
 // ===================== WIFI + MQTT =====================
 const char* ssid = "Mark_Wifi";
@@ -23,6 +24,7 @@ const char* topic_status   = "windowshade/status";
 const char* supabase_url = "https://tmwzwhnpllgumuupmryf.supabase.co";
 const char* supabase_key = "sb_publishable_6_J4gNe2AiqsO2Zs6QF4Aw_TaPoHM4H";
 const char* supabase_log_endpoint = "/rest/v1/Logs";
+const char* supabase_settings_endpoint = "/rest/v1/Settings?module=eq.windowshade&select=settings";
 
 const char* module_name = "Modul_WindowShade";
 
@@ -45,6 +47,17 @@ PubSubClient client(secureClient);
 // State
 long targetPosition = OPEN_POSITION;
 String currentState = "OPEN";
+
+// Schedule state (from Supabase Settings.settings JSON)
+int scheduledOpenHour = 7;
+int scheduledOpenMinute = 0;
+int scheduledCloseHour = 20;
+int scheduledCloseMinute = 0;
+unsigned long lastSettingsFetchMs = 0;
+long lastOpenTriggerStamp = -1;
+long lastCloseTriggerStamp = -1;
+
+const unsigned long SETTINGS_REFRESH_INTERVAL_MS = 300000; // 5 minutes
 
 // ===================== JSON ESCAPE =====================
 String escapeJson(String s) {
@@ -99,6 +112,138 @@ bool sendLogToSupabaseRaw(const String& jsonBody) {
 
   https.end();
   return (httpCode >= 200 && httpCode < 300);
+}
+
+int parseTwoDigitNumber(const String& value, int fromIndex) {
+  if (fromIndex < 0 || fromIndex + 1 >= value.length()) return -1;
+  if (!isDigit(value[fromIndex]) || !isDigit(value[fromIndex + 1])) return -1;
+  return (value[fromIndex] - '0') * 10 + (value[fromIndex + 1] - '0');
+}
+
+bool extractTimeFromJson(const String& payload, const String& key, int& outHour, int& outMinute) {
+  String needle = "\"" + key + "\"";
+  int keyPos = payload.indexOf(needle);
+  if (keyPos < 0) return false;
+
+  int colonPos = payload.indexOf(':', keyPos + needle.length());
+  if (colonPos < 0) return false;
+
+  int firstQuote = payload.indexOf('"', colonPos + 1);
+  if (firstQuote < 0) return false;
+
+  int secondQuote = payload.indexOf('"', firstQuote + 1);
+  if (secondQuote < 0) return false;
+
+  String timeText = payload.substring(firstQuote + 1, secondQuote);
+  if (timeText.length() < 5 || timeText[2] != ':') return false;
+
+  int h = parseTwoDigitNumber(timeText, 0);
+  int m = parseTwoDigitNumber(timeText, 3);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return false;
+
+  outHour = h;
+  outMinute = m;
+  return true;
+}
+
+bool fetchWindowshadeScheduleFromSupabase() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Settings fetch skipped: no WiFi");
+    return false;
+  }
+
+  WiFiClientSecure settingsClient;
+  settingsClient.setInsecure();
+
+  HTTPClient https;
+  String url = String(supabase_url) + String(supabase_settings_endpoint);
+  if (!https.begin(settingsClient, url)) {
+    Serial.println("Supabase settings HTTP begin failed");
+    return false;
+  }
+
+  https.addHeader("apikey", supabase_key);
+  https.addHeader("Authorization", "Bearer " + String(supabase_key));
+
+  int httpCode = https.GET();
+  if (httpCode <= 0) {
+    Serial.print("Settings GET error: ");
+    Serial.println(https.errorToString(httpCode));
+    https.end();
+    return false;
+  }
+
+  if (httpCode < 200 || httpCode >= 300) {
+    Serial.print("Settings GET bad code: ");
+    Serial.println(httpCode);
+    String errResponse = https.getString();
+    if (errResponse.length() > 0) {
+      Serial.println(errResponse);
+    }
+    https.end();
+    return false;
+  }
+
+  String response = https.getString();
+  https.end();
+
+  int parsedOpenHour = scheduledOpenHour;
+  int parsedOpenMinute = scheduledOpenMinute;
+  int parsedCloseHour = scheduledCloseHour;
+  int parsedCloseMinute = scheduledCloseMinute;
+
+  bool openOk = extractTimeFromJson(response, "OPEN", parsedOpenHour, parsedOpenMinute);
+  bool closeOk = extractTimeFromJson(response, "CLOSE", parsedCloseHour, parsedCloseMinute);
+
+  if (!openOk || !closeOk) {
+    Serial.println("Settings parse failed, keep previous schedule");
+    return false;
+  }
+
+  scheduledOpenHour = parsedOpenHour;
+  scheduledOpenMinute = parsedOpenMinute;
+  scheduledCloseHour = parsedCloseHour;
+  scheduledCloseMinute = parsedCloseMinute;
+
+  Serial.printf("Schedule updated: OPEN %02d:%02d, CLOSE %02d:%02d\n",
+                scheduledOpenHour, scheduledOpenMinute,
+                scheduledCloseHour, scheduledCloseMinute);
+  return true;
+}
+
+void setupLocalTime() {
+  setenv("TZ", "CET-1CEST,M3.5.0/2,M10.5.0/3", 1);
+  tzset();
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+
+  struct tm timeInfo;
+  if (!getLocalTime(&timeInfo, 10000)) {
+    Serial.println("NTP sync failed");
+    return;
+  }
+
+  Serial.printf("Local time synced: %02d:%02d:%02d\n", timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_sec);
+}
+
+void runWindowshadeScheduledActions() {
+  struct tm timeInfo;
+  if (!getLocalTime(&timeInfo, 100)) {
+    return;
+  }
+
+  long minuteStamp = (long)timeInfo.tm_yday * 1440L + (long)timeInfo.tm_hour * 60L + (long)timeInfo.tm_min;
+
+  if (timeInfo.tm_hour == scheduledOpenHour && timeInfo.tm_min == scheduledOpenMinute && minuteStamp != lastOpenTriggerStamp) {
+    setTargetOpen();
+    logEvent("schedule_open_triggered");
+    lastOpenTriggerStamp = minuteStamp;
+  }
+
+  if (timeInfo.tm_hour == scheduledCloseHour && timeInfo.tm_min == scheduledCloseMinute && minuteStamp != lastCloseTriggerStamp) {
+    setTargetClosed();
+    logEvent("schedule_close_triggered");
+    lastCloseTriggerStamp = minuteStamp;
+  }
 }
 
 bool logEvent(const String& eventName) {
@@ -305,6 +450,9 @@ void setup() {
   stepper.setCurrentPosition(OPEN_POSITION);
 
   connectWiFi();
+  setupLocalTime();
+  fetchWindowshadeScheduleFromSupabase();
+  lastSettingsFetchMs = millis();
 
   secureClient.setInsecure();
 
@@ -326,6 +474,14 @@ void loop() {
   }
 
   client.loop();
+
+  unsigned long nowMs = millis();
+  if (nowMs - lastSettingsFetchMs >= SETTINGS_REFRESH_INTERVAL_MS) {
+    fetchWindowshadeScheduleFromSupabase();
+    lastSettingsFetchMs = nowMs;
+  }
+
+  runWindowshadeScheduledActions();
 
   if (stepper.distanceToGo() != 0) {
     stepper.run();
