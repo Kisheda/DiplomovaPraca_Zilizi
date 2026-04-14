@@ -1,20 +1,19 @@
 This project is a full-stack IoT smart home system developed as part of a diploma thesis.
 It integrates ESP32-based hardware modules with a modern web application dashboard.  
 
-🚀 Features
-🌡️ Environmental monitoring (temperature, humidity, light, pressure, soil)
-🌫️ Air quality detection (CO sensor)
-🚿 Automatic irrigation system
-🔒 Security system with RFID authentication
-🪟 Automated window shading (stepper motor control)
-📟 Local touchscreen display control
-🌐 Web dashboard for monitoring and control
-📊 Logging system with filtering
-🔐 Secure authentication via MQTT (HiveMQ)
-🔒 TLS encrypted communication
+<h1> 🚀 Features: </h1></br>
+🌡️ Environmental monitoring (temperature, humidity, light, pressure, soil) </br>
+🌫️ Air quality detection (CO sensor)  </br>
+🚿 Automatic irrigation system  </br>
+🔒 Security system with RFID authentication </br>
+🪟 Automated window shading (stepper motor control) </br>
+📟 Local touchscreen display control </br>
+🌐 Web dashboard for monitoring and control </br>
+📊 Logging system with filtering </br>
+🔐 Secure authentication via MQTT (HiveMQ) </br>
+🔒 TLS encrypted communication </br>
 
-The system follows a modular IoT architecture:
-
+<h1> The system follows a modular IoT architecture: </h1>
 Hardware layer
 ESP32 modules (C/C++)
 Communication layer
@@ -24,9 +23,8 @@ Supabase (PostgreSQL + REST API)
 Frontend layer
 React + TypeScript + Tailwind CSS + Vite
 
-🧠 Architecture
+<h1>🧠 Architecture </h1>
 The system follows a modular IoT architecture:
-
 Hardware layer
 ESP32 modules (C/C++)
 Communication layer
@@ -36,23 +34,23 @@ Supabase (PostgreSQL + REST API)
 Frontend layer
 React + TypeScript + Tailwind CSS + Vite
 
-📡 Modules
+<h1> 📡 Modules </h1>
 CO Sensor Module -Measures air quality, Triggers alarm when threshold exceeded
 Environmental & Irrigation Module - Monitors environment, Automatically controls water pump
 Security Module - RFID-based authentication, Alarm system for unauthorized access
 Window Shade Module - Stepper motor controlled shading, Manual and scheduled automation
 Display Module - Local touchscreen UI
 
-📦 Installation
-1. Clone repository
+## 📦 Installation
+
+### 1. Clone repository
+```bash
 git clone https://github.com/Kisheda/DiplomovaPraca_Zilizi.git
 cd DiplomovaPraca_Zilizi
-2. Install frontend dependencies
 npm install
-3. Run development server
 npm run dev
-
-🌐 Web Application
+```
+<h1> 🌐 Web Application </h1>  </br>
 The web dashboard provides:
 
 Real-time data visualization
