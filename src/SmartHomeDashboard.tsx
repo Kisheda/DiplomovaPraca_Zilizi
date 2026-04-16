@@ -222,9 +222,15 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
   const chartWindowEndMs = useMemo(() => {
     const points = chartData.filter((point) => Number.isFinite(point.timestampMs));
     if (points.length === 0) return Date.now();
+    if (points.length === 1) return points[0].timestampMs + 15 * 60 * 1000;
     return points[points.length - 1].timestampMs;
   }, [chartData]);
-  const chartWindowStartMs = chartWindowEndMs - 24 * 60 * 60 * 1000;
+  const chartWindowStartMs = useMemo(() => {
+    const points = chartData.filter((point) => Number.isFinite(point.timestampMs));
+    if (points.length === 0) return Date.now();
+    if (points.length === 1) return points[0].timestampMs - 15 * 60 * 1000;
+    return points[0].timestampMs;
+  }, [chartData]);
 
   const moduleStatus = {
     Meteostanica: meteoStatus === "ONLINE" ? "ONLINE" : "OFFLINE",
@@ -324,7 +330,7 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="mb-3 text-sm text-slate-500">
-                    Buckets (15m): {historyData.length} / Filled buckets: {filledBucketCount} / Raw rows: {rawMeasurementCount} / Range: {rangeLabel} / Loading: {String(historyLoading)}
+                    Rows shown: {historyData.length} / Filled rows: {filledBucketCount} / Raw DB rows: {rawMeasurementCount} / Range: {rangeLabel} 
                   </div>
                   {historyLoading ? (
                     <div className="flex h-80 items-center justify-center text-slate-500">Loading history chart...</div>
@@ -364,16 +370,18 @@ export default function SmartHomeDashboard({ onLogsClick, onLogout }: { onLogsCl
                                 <th className="px-2 py-2 text-right font-medium">Humidity (%)</th>
                                 <th className="px-2 py-2 text-right font-medium">Soil (%)</th>
                                 <th className="px-2 py-2 text-right font-medium">Light (lx)</th>
+                                <th className="px-2 py-2 text-right font-medium">Pressure (hPa)</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {recentHistoryRows.map((row) => (
-                                <tr key={row.timestamp} className="border-t">
-                                  <td className="px-2 py-1.5 text-left">{formatTimestamp(row.timestamp)}</td>
+                              {recentHistoryRows.map((row, index) => (
+                                <tr key={`${row.timestamp}-${index}`} className="border-t">
+                                  <td className="px-2 py-1.5 text-left">{row.time}</td>
                                   <td className="px-2 py-1.5 text-right">{row.temp ?? "-"}</td>
                                   <td className="px-2 py-1.5 text-right">{row.humidity ?? "-"}</td>
                                   <td className="px-2 py-1.5 text-right">{row.soil ?? "-"}</td>
                                   <td className="px-2 py-1.5 text-right">{row.light ?? "-"}</td>
+                                  <td className="px-2 py-1.5 text-right">{row.pressure ?? "-"}</td>
                                 </tr>
                               ))}
                             </tbody>

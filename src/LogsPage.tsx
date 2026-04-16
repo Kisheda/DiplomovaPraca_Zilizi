@@ -72,7 +72,7 @@ export default function LogsPage({ onBack }: LogsPageProps) {
   const [editingNote, setEditingNote] = useState<string>("");
   const [editingColumn, setEditingColumn] = useState<string>("note");
   const [savingCardId, setSavingCardId] = useState<number | null>(null);
-  const [limit, setLimit] = useState<10 | 100>(100);
+  const [limit, setLimit] = useState<10 | 97>(97);
 
   // --- Measurement filters ---
   const [mDatePreset, setMDatePreset] = useState<DatePreset>("all");
@@ -160,7 +160,7 @@ export default function LogsPage({ onBack }: LogsPageProps) {
     setSavingCardId(null);
   };
 
-  const handleLimitChange = (newLimit: 10 | 100) => {
+  const handleLimitChange = (newLimit: 10 | 97) => {
     setLimit(newLimit);
     fetchMeasurements(newLimit);
     fetchLogs(newLimit);
@@ -267,12 +267,12 @@ export default function LogsPage({ onBack }: LogsPageProps) {
                 Last 10
               </Button>
               <Button
-                variant={limit === 100 ? "default" : "ghost"}
+                variant={limit === 97 ? "default" : "ghost"}
                 size="sm"
                 className="h-6 px-2 text-xs"
-                onClick={() => handleLimitChange(100)}
+                onClick={() => handleLimitChange(97)}
               >
-                Last 100
+                Last 97
               </Button>
             </div>
           </div>
